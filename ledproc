@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+#ledproc 1.0
+#tezeta 2020
+
+import os, time, telnetlib, threading, argparse, configparser, re, ctypes
+
+c_uint8 = ctypes.c_uint8
+
+#led status is controlled via bitmask
+#six GPO bits control the LEDS
+#more info in Matrix Orbital's documentation
+
+class GPIO_bits( ctypes.LittleEndianStructure ):
+    _fields_ = [
+                ("a", c_uint8, 1 ),
+                ("b", c_uint8, 1 ),
+                ("c", c_uint8, 1 ),
+                ("d", c_uint8, 1 ),
+                ("e", c_uint8, 1 ),
+                ("f", c_uint8, 1 ),
+               ]
+
+class GPIO( ctypes.Union ):
+    _anonymous_ = ("bit",)
+    _fields_ = [
+                ("bit",    GPIO_bits ),
+                ("asByte", c_uint8    )
+               ]
+
+gpio = GPIO()
+gpio.asByte = 0x0
+
+parser =  argparse.ArgumentParser(description='python led controller for certain Matrix Orbital displays using lcdproc',epilog='Parameters override any config found. Syntax for led: filename [color=r,g,o] [searchstring]')
+parser.add_argument('-d', '--debug', action='store_true', default=False, help='Enable debug output')
+parser.add_argument('-s', '--server', metavar='server', help='LCDd server', nargs=2, default=['127.0.0.1','13666'])
+parser.add_argument('--led1', '-1', metavar='option', help='Control led1',nargs='+')
+parser.add_argument('--led2', '-2', metavar='option', help='Control led2',nargs='+')
+parser.add_argument('--led3', '-3', metavar='option', help='Control led3',nargs='+')
+parser.add_argument('--config','-c', metavar='filename', help='Use config file', nargs=1, default=['/etc/ledproc.conf'])
+args = parser.parse_args()
+
+def debug(message):
+    if args.debug:
+        print("debug: " + str(message))
+    return message
+
+def info(message):
+    print("info: " + str(message))
+    return message
+
+def error(message):
+    print("ERROR: " + str(message))
+    return message
+
+def sendcmd(tn):
+    byte = str(gpio.asByte) # get bitmask as number
+    string = "output " + str(gpio.asByte) + "\n"
+    debug("send command \"" + string.rstrip() + "\"")
+    tn.write(string.encode('utf-8'))
+    if args.debug:
+        debug("recieved \"" + str(tn.read_until(b"\n")) + "\"")
+
+def colorflags(led, color):
+    #led logic based on MXO's documentation
+    #if the color is not defined assume it should be off
+    led = int(led)
+    if led==1:
+        gpio.a=0
+        gpio.b=0
+        if color=='r':
+            gpio.a=1
+            gpio.b=0
+        if color=='g':
+            gpio.a=0
+            gpio.b=1
+        if color=='o':
+            gpio.a=1
+            gpio.b=1
+    if led==2:
+        gpio.c=0
+        gpio.d=0
+        if color=='r':
+            gpio.c=1
+            gpio.d=0
+        if color=='g':
+            gpio.c=0
+            gpio.d=1
+        if color=='o':
+            gpio.c=1
+            gpio.d=1
+    if led==3:
+        gpio.e=0
+        gpio.f=0
+        if color=='r':
+            gpio.e=1
+            gpio.f=0
+        if color=='g':
+            gpio.e=0
+            gpio.f=1
+        if color=='o':
+            gpio.e=1
+            gpio.f=1
+
+def monitor(filename, color, searchstring, led):
+    if (color != 'r') and (color != 'g') and (color != 'o'):
+        raise AssertionError("Color " + color + " is not a valid color")
+
+    i = ''
+    info("opening " + filename + "[\"" + searchstring + "\"] using led " + str(led) + " with color " + color)
+    while True:
+        with open(filename, "r") as st:
+            time.sleep(.1)
+            st = st.read()
+            
+            if searchstring:
+                s = ""
+                for line in st.splitlines():
+                    if re.search(searchstring, line):
+                        s += line
+            else:
+                s = st
+
+            if s == "":
+                raise IndexError("Substring " + searchstring + " doesn't exist in " + filename)
+
+            if s != i: #contents have changed
+                debug("change in file "+filename + "[" + searchstring +"] detected, flashing led " + str(led))
+                colorflags(led, color) #set flags based on LED and color requested
+            
+                sendcmd(tn) #flash LED
+                time.sleep(0.1)
+
+                colorflags(led, "null")
+                sendcmd(tn) #turn off LED
+                time.sleep(0.4)
+            i = s
+
+def getConfig(filename):
+    cfg = configparser.ConfigParser()
+    ledargs = {}
+    
+    if os.path.exists(filename):
+        try:
+            debug(cfg.read(filename))
+            for led in ['1','2','3']:
+                ledargs['led'+led] = {}
+                ledargs['led'+led]['filename'] = cfg.get('led'+led,'filename')
+                ledargs['led'+led]['color'] = cfg.get('led'+led,'color')
+                ledargs['led'+led]['searchstring'] = cfg.get('led'+led,'searchstring')
+        except:
+                pass
+    try:
+        if args.led1:
+            ledargs['led1'] = {}
+            ledargs['led1']['filename'] = args.led1[0]
+            ledargs['led1']['color'] = args.led1[1].lower()
+            ledargs['led1']['searchstring'] = args.led1[2]
+        if args.led2:
+            ledargs['led2'] = {}
+            ledargs['led2']['filename'] = args.led2[0]
+            ledargs['led2']['color'] = args.led2[1].lower()
+            ledargs['led2']['searchstring'] = args.led2[2]
+        if args.led3:
+            ledargs['led3'] = {}
+            ledargs['led3']['filename'] = args.led3[0]
+            ledargs['led3']['color'] = args.led3[1].lower()
+            ledargs['led3']['searchstring'] = args.led3[2]
+    except:
+        pass
+
+    return debug(ledargs)
+
+if __name__ == "__main__":
+    try:
+        tn = debug(telnetlib.Telnet(args.server[0], args.server[1]))
+        tn.write(b"hello\n")
+        debug(tn.read_until(b'\n'))
+    except ConnectionRefusedError:
+        error("Failed to connect to server!")
+        exit(1)
+    
+    info("initializing...")
+    for colortest in ['r','o','g','']:
+        for ledtest in ['1','2','3']:
+            debug("testing led " + ledtest)
+            colorflags(ledtest, colortest)
+        sendcmd(tn)
+        time.sleep(0.4)
+ 
+    leds={}
+    ledargs=getConfig(str(args.config[0]))
+
+    for led in ['1','2','3']:
+        if not 'led' + led in ledargs or not 'filename' in ledargs['led'+led]:
+            continue
+        if not 'color' in ledargs['led'+led]:
+            ledargs['led'+led]['color'] = 'o'
+        if not 'searchstring' in ledargs['led'+led]:
+            ledargs['led'+led]['searchstring'] = ''
+
+        debug("Creating thread for LED" + led + " with arguments: " + str(ledargs['led'+led]))
+        leds[led] = threading.Thread(target=monitor, args=(ledargs['led'+led]['filename'], ledargs['led'+led]['color'].lower(), ledargs['led'+led]['searchstring'], led))
+        leds[led].start()
