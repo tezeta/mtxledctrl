@@ -33,12 +33,12 @@ gpio.asByte = 0x0
 parser =  argparse.ArgumentParser(description='python led controller for certain Matrix Orbital displays using lcdproc',epilog='Parameters override any config found. Syntax for led: filename [color=r,g,o] [searchstring]')
 parser.add_argument('-d', '--debug', action='store_true', default=False, help='Enable debug output')
 parser.add_argument('-s', '--server', metavar='server', help='LCDd server', nargs=2, default=['127.0.0.1','13666'])
+parser.add_argument('-u', '--update', metavar='option', help='Update interval', nargs=1, type=float, default=[0.5])
 parser.add_argument('--led1', '-1', metavar='option', help='Control led1',nargs='+')
 parser.add_argument('--led2', '-2', metavar='option', help='Control led2',nargs='+')
 parser.add_argument('--led3', '-3', metavar='option', help='Control led3',nargs='+')
 parser.add_argument('--config','-c', metavar='filename', help='Use config file', nargs=1, default=['/etc/ledproc.conf'])
 args = parser.parse_args()
-
 def debug(message):
     if args.debug:
         print("debug: " + str(message))
@@ -109,7 +109,6 @@ def monitor(filename, color, searchstring, led):
     info("opening " + filename + "[\"" + searchstring + "\"] using led " + str(led) + " with color " + color)
     while True:
         with open(filename, "r") as st:
-            time.sleep(.1)
             st = st.read()
             
             if searchstring:
@@ -128,12 +127,12 @@ def monitor(filename, color, searchstring, led):
                 colorflags(led, color) #set flags based on LED and color requested
             
                 sendcmd(tn) #flash LED
-                time.sleep(0.1)
+                time.sleep(args.update[0])
 
                 colorflags(led, "null")
                 sendcmd(tn) #turn off LED
-                time.sleep(0.4)
             i = s
+            time.sleep(args.update[0])
 
 def getConfig(filename):
     cfg = configparser.ConfigParser()
@@ -185,7 +184,7 @@ if __name__ == "__main__":
             debug("testing led " + ledtest)
             colorflags(ledtest, colortest)
         sendcmd(tn)
-        time.sleep(0.4)
+        time.sleep(args.update[0])
  
     leds={}
     ledargs=getConfig(str(args.config[0]))
