@@ -2,33 +2,7 @@
 #ledproc 1.0
 #tezeta 2020
 
-import os, time, telnetlib, threading, argparse, configparser, re, ctypes
-
-c_uint8 = ctypes.c_uint8
-
-#led status is controlled via bitmask
-#six GPO bits control the LEDS
-#more info in Matrix Orbital's documentation
-
-class GPIO_bits( ctypes.LittleEndianStructure ):
-    _fields_ = [
-                ("a", c_uint8, 1 ),
-                ("b", c_uint8, 1 ),
-                ("c", c_uint8, 1 ),
-                ("d", c_uint8, 1 ),
-                ("e", c_uint8, 1 ),
-                ("f", c_uint8, 1 ),
-               ]
-
-class GPIO( ctypes.Union ):
-    _anonymous_ = ("bit",)
-    _fields_ = [
-                ("bit",    GPIO_bits ),
-                ("asByte", c_uint8    )
-               ]
-
-gpio = GPIO()
-gpio.asByte = 0x0
+import mtxledctrl, os, threading, argparse, configparser, re, time
 
 parser =  argparse.ArgumentParser(description='python led controller for certain Matrix Orbital displays using lcdproc',epilog='Parameters override any config found. Syntax for led: filename [color=r,g,o] [searchstring]')
 parser.add_argument('-d', '--debug', action='store_true', default=False, help='Enable debug output')
@@ -39,8 +13,10 @@ parser.add_argument('--led2', '-2', metavar='option', help='Control led2',nargs=
 parser.add_argument('--led3', '-3', metavar='option', help='Control led3',nargs='+')
 parser.add_argument('--config','-c', metavar='filename', help='Use config file', nargs=1, default=['/etc/ledproc.conf'])
 args = parser.parse_args()
+debugOn = args.debug
+
 def debug(message):
-    if args.debug:
+    if debugOn:
         print("debug: " + str(message))
     return message
 
@@ -51,55 +27,6 @@ def info(message):
 def error(message):
     print("ERROR: " + str(message))
     return message
-
-def sendcmd(tn):
-    byte = str(gpio.asByte) # get bitmask as number
-    string = "output " + str(gpio.asByte) + "\n"
-    debug("send command \"" + string.rstrip() + "\"")
-    tn.write(string.encode('utf-8'))
-    if args.debug:
-        debug("recieved \"" + str(tn.read_until(b"\n")) + "\"")
-
-def colorflags(led, color):
-    #led logic based on MXO's documentation
-    #if the color is not defined assume it should be off
-    led = int(led)
-    if led==1:
-        gpio.a=0
-        gpio.b=0
-        if color=='r':
-            gpio.a=1
-            gpio.b=0
-        if color=='g':
-            gpio.a=0
-            gpio.b=1
-        if color=='o':
-            gpio.a=1
-            gpio.b=1
-    if led==2:
-        gpio.c=0
-        gpio.d=0
-        if color=='r':
-            gpio.c=1
-            gpio.d=0
-        if color=='g':
-            gpio.c=0
-            gpio.d=1
-        if color=='o':
-            gpio.c=1
-            gpio.d=1
-    if led==3:
-        gpio.e=0
-        gpio.f=0
-        if color=='r':
-            gpio.e=1
-            gpio.f=0
-        if color=='g':
-            gpio.e=0
-            gpio.f=1
-        if color=='o':
-            gpio.e=1
-            gpio.f=1
 
 def monitor(filename, color, searchstring, led):
     if (color != 'r') and (color != 'g') and (color != 'o'):
@@ -124,17 +51,17 @@ def monitor(filename, color, searchstring, led):
 
             if s != i: #contents have changed
                 debug("change in file "+filename + "[" + searchstring +"] detected, flashing led " + str(led))
-                colorflags(led, color) #set flags based on LED and color requested
+                mtxledctrl.queuecolor(led, color) #set flags based on LED and color requested
             
-                sendcmd(tn) #flash LED
+                mtxledctrl.sendcmd(tn) #flash LED
                 time.sleep(args.update[0])
 
-                colorflags(led, "null")
-                sendcmd(tn) #turn off LED
+                mtxledctrl.queuecolor(led, "null")
+                mtxledctrl.sendcmd(tn) #turn off LED
             i = s
             time.sleep(args.update[0])
 
-def getConfig(filename):
+def getcfg(filename):
     cfg = configparser.ConfigParser()
     ledargs = {}
     
@@ -170,24 +97,11 @@ def getConfig(filename):
     return debug(ledargs)
 
 if __name__ == "__main__":
-    try:
-        tn = debug(telnetlib.Telnet(args.server[0], args.server[1]))
-        tn.write(b"hello\n")
-        debug(tn.read_until(b'\n'))
-    except ConnectionRefusedError:
-        error("Failed to connect to server!")
-        exit(1)
-    
     info("initializing...")
-    for colortest in ['r','o','g','']:
-        for ledtest in ['1','2','3']:
-            debug("testing led " + ledtest)
-            colorflags(ledtest, colortest)
-        sendcmd(tn)
-        time.sleep(args.update[0])
- 
+    tn = mtxledctrl.init(args.server[0], args.server[1])
+     
     leds={}
-    ledargs=getConfig(str(args.config[0]))
+    ledargs=getcfg(str(args.config[0]))
 
     for led in ['1','2','3']:
         if not 'led' + led in ledargs or not 'filename' in ledargs['led'+led]:
