@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-#ledproc 1.1
+#mtxledctrl 1.0
 #tezeta 2021
 
 import ctypes, time, telnetlib
