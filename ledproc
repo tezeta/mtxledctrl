@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-#ledproc 1.0
-#tezeta 2020
+#ledproc 1.1
+#tezeta 2021
 
 import mtxledctrl, os, threading, argparse, configparser, re, time
 
-parser =  argparse.ArgumentParser(description='python led controller for certain Matrix Orbital displays using lcdproc',epilog='Parameters override any config found. Syntax for led: filename [color=r,g,o] [searchstring]')
+parser =  argparse.ArgumentParser(description='python led controller for certain Matrix Orbital displays using lcdproc',epilog='Parameters override any config found. Syntax for led: filename [color=r,g,o] [blkid]')
 parser.add_argument('-d', '--debug', action='store_true', default=False, help='Enable debug output')
 parser.add_argument('-s', '--server', metavar='server', help='LCDd server', nargs=2, default=['127.0.0.1','13666'])
 parser.add_argument('-u', '--update', metavar='option', help='Update interval', nargs=1, type=float, default=[0.5])
@@ -28,31 +28,43 @@ def error(message):
     print("ERROR: " + str(message))
     return message
 
-def monitor(filename, color, searchstring, led):
+def getIDfromDiskID(searchstr):
+    for diskid in searchstr.split("|"):
+        if os.path.exists('/dev/disk/by-id/' + diskid):
+            blkid = os.readlink('/dev/disk/by-id/' + diskid).split('/')[2]
+            searchstr = searchstr.replace(diskid,blkid)
+
+    return searchstr
+
+def monitor(filename, color, searchstr, led):
     if (color != 'r') and (color != 'g') and (color != 'o'):
         raise AssertionError("Color " + color + " is not a valid color")
 
+    debug("Attempting to resolve drive IDs from " + searchstr)
+    blkid = getIDfromDiskID(searchstr)
+    debug(searchstr + " -> " + blkid)
+
     i = ''
-    info("opening " + filename + "[\"" + searchstring + "\"] using led " + str(led) + " with color " + color)
+    info("opening " + filename + "[\"" + blkid + "\"] using led " + str(led) + " with color " + color)
     while True:
         with open(filename, "r") as st:
             st = st.read()
-            
-            if searchstring:
+
+            if blkid:
                 s = ""
                 for line in st.splitlines():
-                    if re.search(searchstring, line):
+                    if re.search(blkid, line):
                         s += line
             else:
                 s = st
 
             if s == "":
-                raise IndexError("Substring " + searchstring + " doesn't exist in " + filename)
+                raise IndexError("Substring " + blkid + " doesn't exist in " + filename)
 
             if s != i: #contents have changed
-                debug("change in file "+filename + "[" + searchstring +"] detected, flashing led " + str(led))
+                debug("change in file "+filename + "[" + blkid +"] detected, flashing led " + str(led))
                 mtxledctrl.queuecolor(led, color) #set flags based on LED and color requested
-            
+
                 mtxledctrl.sendcmd(tn) #flash LED
                 time.sleep(args.update[0])
 
@@ -70,27 +82,23 @@ def getcfg(filename):
             debug(cfg.read(filename))
             for led in ['1','2','3']:
                 ledargs['led'+led] = {}
-                ledargs['led'+led]['filename'] = cfg.get('led'+led,'filename')
                 ledargs['led'+led]['color'] = cfg.get('led'+led,'color')
-                ledargs['led'+led]['searchstring'] = cfg.get('led'+led,'searchstring')
+                ledargs['led'+led]['blkid'] = cfg.get('led'+led,'blkid')
         except:
                 pass
     try:
         if args.led1:
             ledargs['led1'] = {}
-            ledargs['led1']['filename'] = args.led1[0]
             ledargs['led1']['color'] = args.led1[1].lower()
-            ledargs['led1']['searchstring'] = args.led1[2]
+            ledargs['led1']['blkid'] = args.led1[2]
         if args.led2:
             ledargs['led2'] = {}
-            ledargs['led2']['filename'] = args.led2[0]
             ledargs['led2']['color'] = args.led2[1].lower()
-            ledargs['led2']['searchstring'] = args.led2[2]
+            ledargs['led2']['blkid'] = args.led2[2]
         if args.led3:
             ledargs['led3'] = {}
-            ledargs['led3']['filename'] = args.led3[0]
             ledargs['led3']['color'] = args.led3[1].lower()
-            ledargs['led3']['searchstring'] = args.led3[2]
+            ledargs['led3']['blkid'] = args.led3[2]
     except:
         pass
 
@@ -104,13 +112,15 @@ if __name__ == "__main__":
     ledargs=getcfg(str(args.config[0]))
 
     for led in ['1','2','3']:
+        ledargs['led'+led]['filename'] = "/proc/diskstats"
+
         if not 'led' + led in ledargs or not 'filename' in ledargs['led'+led]:
             continue
         if not 'color' in ledargs['led'+led]:
             ledargs['led'+led]['color'] = 'o'
-        if not 'searchstring' in ledargs['led'+led]:
-            ledargs['led'+led]['searchstring'] = ''
+        if not 'blkid' in ledargs['led'+led]:
+            ledargs['led'+led]['blkid'] = ''
 
         debug("Creating thread for LED" + led + " with arguments: " + str(ledargs['led'+led]))
-        leds[led] = threading.Thread(target=monitor, args=(ledargs['led'+led]['filename'], ledargs['led'+led]['color'].lower(), ledargs['led'+led]['searchstring'], led))
+        leds[led] = threading.Thread(target=monitor, args=(ledargs['led'+led]['filename'], ledargs['led'+led]['color'].lower(), ledargs['led'+led]['blkid'], led))
         leds[led].start()

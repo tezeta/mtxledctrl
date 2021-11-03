@@ -1,7 +1,6 @@
 # mtxledctrl
-LED controller for Matrix Orbital LCDs through LCDd. Tested with the LK204-7T-1U, should work with similiar models.
-
-Each LED can be set to red, orange or green. Color changes are queued before sending them:
+LED controller for Matrix Orbital LCDs through LCDd. Tested with the LK204-7T-1U, should work with similiar models with LEDs.
+Each LED can be either red, orange or green. Color changes are queued before sending them:
 ```
 >>> import mtxledctrl
 >>> tn = mtxledctrl.init("127.0.0.1","13666")
