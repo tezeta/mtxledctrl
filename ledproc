@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-#ledproc 1.1
+#ledproc
 #tezeta 2021
 
-import mtxledctrl, os, threading, argparse, configparser, re, time
+import os, threading, argparse, configparser, re, time
+from mtxledctrl import mtxledctrl
 
 parser =  argparse.ArgumentParser(description='python led controller for certain Matrix Orbital displays using lcdproc',epilog='Parameters override any config found. Syntax for led: filename [color=r,g,o] [blkid]')
 parser.add_argument('-d', '--debug', action='store_true', default=False, help='Enable debug output')
@@ -13,10 +14,9 @@ parser.add_argument('--led2', '-2', metavar='option', help='Control led2',nargs=
 parser.add_argument('--led3', '-3', metavar='option', help='Control led3',nargs='+')
 parser.add_argument('--config','-c', metavar='filename', help='Use config file', nargs=1, default=['/etc/ledproc.conf'])
 args = parser.parse_args()
-debugOn = args.debug
 
 def debug(message):
-    if debugOn:
+    if args.debug:
         print("debug: " + str(message))
     return message
 
@@ -63,13 +63,13 @@ def monitor(filename, color, searchstr, led):
 
             if s != i: #contents have changed
                 debug("change in file "+filename + "[" + blkid +"] detected, flashing led " + str(led))
-                mtxledctrl.queuecolor(led, color) #set flags based on LED and color requested
+                ledctrl.queuecolor(led, color) #set flags based on LED and color requested
 
-                mtxledctrl.sendcmd(tn) #flash LED
+                ledctrl.sendcmd() #flash LED
                 time.sleep(args.update[0])
 
-                mtxledctrl.queuecolor(led, "null")
-                mtxledctrl.sendcmd(tn) #turn off LED
+                ledctrl.queuecolor(led, "null")
+                ledctrl.sendcmd() #turn off LED
             i = s
             time.sleep(args.update[0])
 
@@ -106,7 +106,7 @@ def getcfg(filename):
 
 if __name__ == "__main__":
     info("initializing...")
-    tn = mtxledctrl.init(args.server[0], args.server[1])
+    ledctrl = mtxledctrl(args.server[0], args.server[1], args.debug)
      
     leds={}
     ledargs=getcfg(str(args.config[0]))

@@ -8,6 +8,7 @@ pidfile="/run/${instance}.pid"
 
 ionice=3
 nice=5
+export PYTHONDONTWRITEBYTECODE=1
 
 command="/usr/bin/ledproc"
 command_args="--config /etc/ledproc.conf"
